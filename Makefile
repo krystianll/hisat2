@@ -50,6 +50,18 @@ else
 	endif
 endif
 
+# The uname checks above miss two cases: MSYS2 CLANG64/CLANGARM64 shells report
+# "CLANG*_NT", and building from an MSYS (or SSH) shell reports "MSYS_NT" even
+# when the compiler targets mingw. On native Windows there is no POSIX mmap /
+# SysV shm (reference.h/gfm.h would pull <sys/mman.h>, absent under MinGW), so
+# key off the shell-independent Windows env var and disable both. (MINGW/WINDOWS
+# are left as-is: the CLANGARM64 build links -lpthread via the default path,
+# which is the validated configuration.)
+ifeq ($(OS),Windows_NT)
+	BOWTIE_MM = 0
+	BOWTIE_SHARED_MEM = 0
+endif
+
 MACOS = 0
 ifneq (,$(findstring Darwin,$(shell uname)))
 	MACOS = 1
@@ -118,12 +130,12 @@ ifeq (1,$(USE_SRA))
 	SEARCH_LIBS += -L$(NCBI_NGS_DIR)/lib64 -L$(NCBI_VDB_DIR)/lib64
 endif
 
-LIBS = $(PTHREAD_LIB)
+LIBS = $(PTHREAD_LIB) -lz
 
 SHARED_CPPS = ccnt_lut.cpp ref_read.cpp alphabet.cpp shmem.cpp \
 	edit.cpp gfm.cpp \
 	reference.cpp ds.cpp multikey_qsort.cpp limit.cpp \
-	random_source.cpp tinythread.cpp
+	random_source.cpp tinythread.cpp gzip_reader.cpp
 SEARCH_CPPS = qual.cpp pat.cpp \
 	read_qseq.cpp aligner_seed_policy.cpp \
 	aligner_seed.cpp \

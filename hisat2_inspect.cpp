@@ -22,6 +22,11 @@
 #include <getopt.h>
 #include <stdexcept>
 
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#include <stdio.h>
+#endif
 #include "assert_helpers.h"
 #include "endian_swap.h"
 #include "hgfm.h"
@@ -723,6 +728,10 @@ static void driver(
  * main function.  Parses command-line arguments.
  */
 int main(int argc, char **argv) {
+#ifdef _WIN32
+	_setmode(_fileno(stdout), _O_BINARY);
+	_setmode(_fileno(stderr), _O_BINARY);
+#endif
 	try {
 		string ebwtFile;  // read serialized Ebwt from this file
 		string query;   // read query string(s) from this file

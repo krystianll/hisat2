@@ -23,6 +23,11 @@
 #include <stdlib.h>
 #include "tokenize.h"
 #include "ds.h"
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#include <stdio.h>
+#endif
 
 using namespace std;
 
@@ -40,6 +45,11 @@ extern "C" {
  * bowtie.
  */
 int main(int argc, const char **argv) {
+#ifdef _WIN32
+	_setmode(_fileno(stdin),  _O_BINARY); // gz/plain reads piped on stdin ("-")
+	_setmode(_fileno(stdout), _O_BINARY);
+	_setmode(_fileno(stderr), _O_BINARY);
+#endif
 	if(argc > 2 && strcmp(argv[1], "-A") == 0) {
 		const char *file = argv[2];
 		ifstream in;

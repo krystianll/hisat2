@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <stdexcept>
 #include "assert_helpers.h"
+#include "gzip_reader.h"
 
 /**
  * Simple, fast helper for determining if a character is a newline.
@@ -82,14 +83,17 @@ public:
 	 * Return true iff there is a stream ready to read.
 	 */
 	bool isOpen() {
-		return _in != NULL || _inf != NULL || _ins != NULL;
+		return _in != NULL || _inf != NULL || _ins != NULL || _gz != NULL;
 	}
 
 	/**
 	 * Close the input stream (if that's possible)
 	 */
 	void close() {
-		if(_in != NULL && _in != stdin) {
+		if(_gz != NULL) {
+			gzr_close(_gz);
+			_gz = NULL;
+		} else if(_in != NULL && _in != stdin) {
 			fclose(_in);
 		} else if(_inf != NULL) {
 			_inf->close();
@@ -125,6 +129,21 @@ public:
 		_in = in;
 		_inf = NULL;
 		_ins = NULL;
+		_gz = NULL;
+		_cur = BUF_SZ;
+		_buf_sz = BUF_SZ;
+		_done = false;
+	}
+
+	/**
+	 * Initialize the buffer with a new (optionally gzip-compressed) stream
+	 * opened via gzr_open(). The FileBuf owns the handle and closes it.
+	 */
+	void newGzFile(void *gz) {
+		_in = NULL;
+		_inf = NULL;
+		_ins = NULL;
+		_gz = gz;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -137,6 +156,7 @@ public:
 		_in = NULL;
 		_inf = __inf;
 		_ins = NULL;
+		_gz = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -149,6 +169,7 @@ public:
 		_in = NULL;
 		_inf = NULL;
 		_ins = __ins;
+		_gz = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -159,7 +180,9 @@ public:
 	 * stream.
 	 */
 	void reset() {
-		if(_inf != NULL) {
+		if(_gz != NULL) {
+			gzr_rewind(_gz);
+		} else if(_inf != NULL) {
 			_inf->clear();
 			_inf->seekg(0, std::ios::beg);
 		} else if(_ins != NULL) {
@@ -189,7 +212,9 @@ public:
 			// Read a new buffer's worth of data
 			else {
 				// Get the next chunk
-				if(_inf != NULL) {
+				if(_gz != NULL) {
+					_buf_sz = gzr_read(_gz, (char*)_buf, BUF_SZ);
+				} else if(_inf != NULL) {
 					_inf->read((char*)_buf, BUF_SZ);
 					_buf_sz = _inf->gcount();
 				} else if(_ins != NULL) {
@@ -432,6 +457,7 @@ private:
 		_in = NULL;
 		_inf = NULL;
 		_ins = NULL;
+		_gz = NULL;
 		_cur = _buf_sz = BUF_SZ;
 		_done = false;
 		_lastn_cur = 0;
@@ -442,6 +468,7 @@ private:
 	FILE     *_in;
 	std::ifstream *_inf;
 	std::istream  *_ins;
+	void     *_gz;   // opaque gzr handle (gzip_reader.h); NULL unless gz input
 	size_t    _cur;
 	size_t    _buf_sz;
 	bool      _done;
@@ -531,7 +558,7 @@ public:
 	OutFileBuf(const std::string& out, bool binary = false) :
 		name_(out.c_str()), cur_(0), closed_(false)
 	{
-		out_ = fopen(out.c_str(), binary ? "wb" : "w");
+		out_ = fopen(out.c_str(), "wb");
 		if(out_ == NULL) {
 			std::cerr << "Error: Could not open alignment output file " << out.c_str() << std::endl;
 			throw 1;
@@ -547,7 +574,7 @@ public:
 		name_(out), cur_(0), closed_(false)
 	{
 		assert(out != NULL);
-		out_ = fopen(out, binary ? "wb" : "w");
+		out_ = fopen(out, "wb");
 		if(out_ == NULL) {
 			std::cerr << "Error: Could not open alignment output file " << out << std::endl;
 			throw 1;
@@ -571,7 +598,7 @@ public:
 	 */
 	void setFile(const char *out, bool binary = false) {
 		assert(out != NULL);
-		out_ = fopen(out, binary ? "wb" : "w");
+		out_ = fopen(out, "wb");
 		if(out_ == NULL) {
 			std::cerr << "Error: Could not open alignment output file " << out << std::endl;
 			throw 1;

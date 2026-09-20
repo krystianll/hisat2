@@ -883,11 +883,21 @@ protected:
 	void open() {
 		if(fb_.isOpen()) fb_.close();
 		while(filecur_ < infiles_.size()) {
-			// Open read
-			FILE *in;
+			// Open read.  Both real files and stdin go through the zlib reader,
+			// which transparently handles gzip and plain input (no separate
+			// decompression step needed).  On Windows stdin must be in binary
+			// mode first (done by _setmode in main()).
 			if(infiles_[filecur_] == "-") {
-				in = stdin;
-			} else if((in = fopen(infiles_[filecur_].c_str(), "rb")) == NULL) {
+				void *gzin = gzr_dopen(fileno(stdin));
+				if(gzin == NULL) {
+					cerr << "Error: Could not open stdin for reading" << endl;
+					exit(1);
+				}
+				fb_.newGzFile(gzin);
+				return;
+			}
+			void *gz = gzr_open(infiles_[filecur_].c_str());
+			if(gz == NULL) {
 				if(!errs_[filecur_]) {
 					cerr << "Warning: Could not open read file \"" << infiles_[filecur_].c_str() << "\" for reading; skipping..." << endl;
 					errs_[filecur_] = true;
@@ -895,7 +905,7 @@ protected:
 				filecur_++;
 				continue;
 			}
-			fb_.newFile(in);
+			fb_.newGzFile(gz);
 			return;
 		}
 		cerr << "Error: No input read files were valid" << endl;

@@ -1823,7 +1823,7 @@ static void parseOptions(int argc, const char **argv) {
 	}
 	// Now parse all the presets.  Might want to pick which presets version to
 	// use according to other parameters.
-	auto_ptr<Presets> presets(new PresetsV0());
+	unique_ptr<Presets> presets(new PresetsV0());
 	// Apply default preset
 	if(!defaultPreset.empty()) {
 		polstr = applyPreset(defaultPreset, *presets.get()) + polstr;
@@ -3167,8 +3167,8 @@ static void multiseedSearchWorker_hisat2(void *vp) {
 	// problems, or generally characterize performance.
 	
 	//const BitPairReference& refs   = *multiseed_refs;
-	auto_ptr<PatternSourcePerThreadFactory> patsrcFact(createPatsrcFactory(patsrc, tid));
-	auto_ptr<PatternSourcePerThread> ps(patsrcFact->create());
+	unique_ptr<PatternSourcePerThreadFactory> patsrcFact(createPatsrcFactory(patsrc, tid));
+	unique_ptr<PatternSourcePerThread> ps(patsrcFact->create());
 	
     // Instantiate an object for holding reporting-related parameters.
     if(maxSeeds == 0) {
@@ -3189,7 +3189,7 @@ static void multiseedSearchWorker_hisat2(void *vp) {
                        repeat);
     
 	// Instantiate a mapping quality calculator
-	auto_ptr<Mapq> bmapq(new_mapq(mapqv, scoreMin, sc));
+	unique_ptr<Mapq> bmapq(new_mapq(mapqv, scoreMin, sc));
 	
 	// Make a per-thread wrapper for the global MHitSink object.
 	AlnSinkWrap<index_t> msinkwrap(
@@ -4035,7 +4035,7 @@ static void driver(
 		// memory so that we can easily sanity check them later on
 		AlnSink<index_t> *mssink = NULL;
         Timer *_tRef = new Timer(cerr, "Time loading reference: ", timing);
-        auto_ptr<BitPairReference> refs(
+        unique_ptr<BitPairReference> refs(
                                         new BitPairReference(
                                                              adjIdxBase,
                                                              NULL,
@@ -4174,7 +4174,7 @@ static void driver(
                            newAlignSummary,
                            hadoopOut);
             if(alignSumFile != "") {
-                ofstream sumfile(alignSumFile.c_str(), ios::out);
+                ofstream sumfile(alignSumFile.c_str(), ios::out | ios::binary);
                 if(sumfile.is_open()) {
                     mssink->finish(sumfile,
                                    repThresh,
@@ -4188,7 +4188,7 @@ static void driver(
 		}
         if(ssdb != NULL) {
             if(novelSpliceSiteOutfile != "") {
-                ofstream ssdb_file(novelSpliceSiteOutfile.c_str(), ios::out);
+                ofstream ssdb_file(novelSpliceSiteOutfile.c_str(), ios::out | ios::binary);
                 if(ssdb_file.is_open()) {
                     ssdb->print(ssdb_file);
                     ssdb_file.close();
