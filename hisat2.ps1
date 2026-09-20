@@ -67,42 +67,37 @@ function Resolve-Aligner {
     $suffix = if ($UseDebug) { '-debug' } else { '' }
     $small = Join-Path $binDir ('hisat2-align-s' + $suffix + $exe)
     $large = Join-Path $binDir ('hisat2-align-l' + $suffix + $exe)
-    $haveSmall = Test-Path ($Index + '.1.ht2')
-    $haveLarge = Test-Path ($Index + '.1.ht2l')
+    # Mirror the Perl wrapper: default to the small aligner, switch to large only
+    # when forced or when only the large index exists. Do NOT hard-fail on a
+    # missing index -- with no -x (e.g. -h/--help/--version/no args) we still run
+    # the binary so it prints its own usage/version, exactly like the wrapper.
     if ($ForceLarge) {
-        if (-not $haveLarge) { Write-Error "hisat2: --large-index given but $Index.1.ht2l not found"; exit 1 }
+        if ($Index -and -not (Test-Path ($Index + '.1.ht2l'))) {
+            Write-Error "hisat2: --large-index given but $Index.1.ht2l not found"; exit 1
+        }
+        Write-Info "Using a large index enforced by user."
         $chosen = $large
-    } elseif ($haveSmall) {
-        $chosen = $small
-    } elseif ($haveLarge) {
-        $chosen = $large          # only the large index exists -> use it
+    } elseif ($Index -and (Test-Path ($Index + '.1.ht2l')) -and -not (Test-Path ($Index + '.1.ht2'))) {
+        Write-Info "Cannot find a small index but a large one seems to be present."
+        Write-Info "Switching to using the large index (${Index}.1.ht2l)."
+        $chosen = $large
     } else {
-        Write-Error "hisat2: cannot find index $Index (.1.ht2 / .1.ht2l)"; exit 1
+        if ($Index) { Write-Info "Using the small index (${Index}.1.ht2)." }
+        $chosen = $small
     }
     if (-not (Test-Path $chosen)) { Write-Error "hisat2: aligner binary not found: $chosen"; exit 1 }
     return $chosen
 }
 
-function Invoke-Help {
-    Write-Host "hisat2.ps1 -- Perl-free launcher for HISAT2 alignment"
-    Write-Host ""
-    Write-Host "  Picks hisat2-align-s vs -l from the index (or --large-index/--debug) and"
-    Write-Host "  forwards options to the aligner. .gz reads are handled natively. --un/--al/"
-    Write-Host "  --un-conc/--al-conc (+ -gz/-bz2) and --no-unal are implemented here."
-    Write-Host ""
-    Write-Host "  Usage: .\hisat2.ps1 -x <index> {-1 r1 -2 r2 | -U reads} -S <out.sam> [opts]"
-    Write-Host ""
-    Write-Host "  Env: HISAT2_BIN (binary dir), HISAT2_ECHO (print command, don't run)"
-    Write-Host ""
-    Write-Host "Full HISAT2 option list (from the aligner binary):"
-    Write-Host "------------------------------------------------------------------------------"
-    $binDir = Get-BinDir
-    foreach ($stem in @('hisat2-align-s', 'hisat2-align-l')) {
-        $binary = Join-Path $binDir ($stem + $exe)
-        if (Test-Path $binary) { & $binary --wrapper basic-0 -h; return $LASTEXITCODE }
-    }
-    Write-Host "(aligner binary not found in $binDir; set HISAT2_BIN)"
-    return 0
+# Verbose (INFO) logging to stderr, gated on --verbose, mirroring the Perl
+# wrapper's Info() -- including the exact command signature it is about to run.
+# (No custom usage/help: like the Perl wrapper, -h/--help/--version and the
+# no-argument case are handled by the aligner binary itself, which prints the
+# full HISAT2 usage and, on error, we echo "(ERR): hisat2-align exited ...".)
+$verbose = $false
+function Write-Info {
+    param([string]$msg)
+    if ($verbose) { [Console]::Error.WriteLine("(INFO): $msg") }
 }
 
 # Mangle a --*-conc target into its mate-1/mate-2 names (mirrors the Perl wrapper).
@@ -145,10 +140,9 @@ function Unescape-Read {
 }
 
 # ---- argument scan -----------------------------------------------------------
+# No help short-circuit: -h/--help/--version and the no-argument case fall
+# through to the binary (which prints the full HISAT2 usage), like the Perl wrapper.
 $argv = @($args)
-if ($argv.Count -eq 0 -or $argv -contains '-h' -or $argv -contains '--help') {
-    exit (Invoke-Help)
-}
 
 $index      = $null
 $forceLarge = $false
@@ -166,6 +160,7 @@ for ($i = 0; $i -lt $argv.Count; $i++) {
     if ($a -eq '--large-index') { $forceLarge = $true; continue }   # dispatch, consumed
     if ($a -eq '--debug')       { $useDebug   = $true; continue }   # -debug variant, consumed
     if ($a -eq '--no-unal')     { $noUnal     = $true; continue }   # handled in wrapper (see below)
+    if ($a -eq '--verbose')     { $verbose    = $true; $passthru.Add($a); continue }  # INFO here + forward to binary
 
     # Index (needed to choose s/l): recognized but still forwarded.
     if ($a -eq '-x' -or $a -eq '--index') {
@@ -205,8 +200,6 @@ for ($i = 0; $i -lt $argv.Count; $i++) {
     $passthru.Add($a)
 }
 
-if (-not $index) { Write-Error "hisat2: no -x <index> given"; exit 1 }
-
 $binary   = Resolve-Aligner -Index $index -ForceLarge $forceLarge -UseDebug $useDebug
 $passOn   = $passthru.ToArray()
 $doPass   = ($readFns.Count -gt 0)
@@ -217,8 +210,11 @@ if (-not $doPass) {
     if ($noUnal) { $final += '--no-unal' }              # binary handles it natively here
     if ($capOut) { $final += @('-S', $capOut) }
     if ($env:HISAT2_ECHO) { Write-Host ("{0} {1}" -f $binary, ($final -join ' ')); exit 0 }
+    Write-Info ("'{0}' {1}" -f $binary, ($final -join ' '))   # command signature (verbose)
     & $binary @final
-    exit $LASTEXITCODE
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { [Console]::Error.WriteLine("(ERR): hisat2-align exited with value $code") }
+    exit $code
 }
 
 # ---- passthrough path: demultiplex reads into --un/--al/... files ------------
@@ -231,6 +227,7 @@ if ($env:HISAT2_ECHO) {
     Write-Host ("{0} {1}   (+ wrapper demux of: {2})" -f $binary, ($final -join ' '), ($readFns.Keys -join ','))
     exit 0
 }
+Write-Info ("'{0}' {1}" -f $binary, ($final -join ' '))   # command signature (verbose)
 
 # Open the redirected-read writers (with mangling for the -conc pairs).
 $bz2jobs = New-Object System.Collections.Generic.List[object]
@@ -347,4 +344,5 @@ if ($bz2jobs.Count -gt 0) {
     }
 }
 
+if ($code -ne 0) { [Console]::Error.WriteLine("(ERR): hisat2-align exited with value $code") }
 exit $code
